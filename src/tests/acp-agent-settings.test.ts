@@ -98,6 +98,43 @@ describe("ClaudeAcpAgent settings", () => {
     expect(response.modes.currentModeId).toBe("dontAsk");
   });
 
+  it("uses invocation-specific config directories when provided", async () => {
+    const invocationDir = path.join(tempDir, "invocation");
+    const invocationClaudeDir = path.join(invocationDir, ".claude");
+    await fs.promises.mkdir(invocationClaudeDir, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(invocationClaudeDir, "settings.json"),
+      JSON.stringify({
+        permissions: {
+          defaultMode: "plan",
+        },
+      }),
+    );
+
+    const projectDir = path.join(tempDir, "project");
+    await fs.promises.mkdir(projectDir, { recursive: true });
+
+    const { getCapturedOptions } = mockQuery();
+
+    const { ClaudeAcpAgent } = await import("../acp-agent.js");
+    const agent: ClaudeAcpAgentType = new ClaudeAcpAgent(createMockClient());
+
+    const response = await (agent as any).createSession({
+      cwd: projectDir,
+      mcpServers: [],
+      _meta: {
+        disableBuiltInTools: true,
+        claudeCode: {
+          configDir: invocationDir,
+        },
+      },
+    });
+
+    expect(getCapturedOptions().configDir).toBe(invocationDir);
+    expect(getCapturedOptions().env.CLAUDE_CONFIG_DIR).toBe(invocationClaudeDir);
+    expect(response.modes.currentModeId).toBe("plan");
+  });
+
   it("supports acceptEdits mode defaults", async () => {
     await fs.promises.writeFile(
       path.join(tempDir, "settings.json"),

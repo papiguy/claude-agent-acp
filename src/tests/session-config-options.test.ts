@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { AgentSideConnection, SessionNotification } from "@agentclientprotocol/sdk";
 import type { ClaudeAcpAgent as ClaudeAcpAgentType } from "../acp-agent.js";
+import { resolveClaudeInvocationPaths } from "../claude-config.js";
 
 const { registerHookCallbackSpy } = vi.hoisted(() => ({
   registerHookCallbackSpy: vi.fn(),
@@ -91,6 +92,8 @@ describe("session config options", () => {
       },
       input: null,
       cancelled: false,
+      cwd: "/test",
+      invocationPaths: resolveClaudeInvocationPaths(),
       permissionMode: "default",
       settingsManager: {},
       configOptions: structuredClone(MOCK_CONFIG_OPTIONS),

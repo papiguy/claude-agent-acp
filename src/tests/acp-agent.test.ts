@@ -25,6 +25,7 @@ import {
   toolUpdateFromEditToolResponse,
 } from "../tools.js";
 import { toAcpNotifications, promptToClaude, ClaudeAcpAgent, claudeCliPath } from "../acp-agent.js";
+import { resolveClaudeInvocationPaths } from "../claude-config.js";
 import { Pushable } from "../utils.js";
 import { query, SDKAssistantMessage } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "crypto";
@@ -1316,6 +1317,7 @@ describe("stop reason propagation", () => {
       input: new Pushable(),
       cancelled: false,
       cwd: "/test",
+      invocationPaths: resolveClaudeInvocationPaths(),
       permissionMode: "default",
       settingsManager: {} as any,
       accumulatedUsage: {

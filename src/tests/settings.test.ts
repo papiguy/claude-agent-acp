@@ -89,5 +89,36 @@ describe("SettingsManager", () => {
       settings = settingsManager.getSettings();
       expect(settings.permissions?.defaultMode).toBe("plan");
     });
+
+    it("should read invocation-specific settings when custom config dirs are provided", async () => {
+      const invocationDir = path.join(tempDir, "invocation");
+      const invocationClaudeDir = path.join(invocationDir, ".claude");
+      await fs.promises.mkdir(invocationClaudeDir, { recursive: true });
+      await fs.promises.writeFile(
+        path.join(invocationClaudeDir, "settings.json"),
+        JSON.stringify({
+          model: "claude-3-5-sonnet",
+        }),
+      );
+      await fs.promises.writeFile(
+        path.join(invocationClaudeDir, "settings.local.json"),
+        JSON.stringify({
+          permissions: {
+            defaultMode: "plan",
+          },
+        }),
+      );
+
+      settingsManager = new SettingsManager(tempDir, {
+        userConfigDir: invocationClaudeDir,
+        projectConfigDir: null,
+        localConfigDir: invocationClaudeDir,
+      });
+      await settingsManager.initialize();
+
+      const settings = settingsManager.getSettings();
+      expect(settings.model).toBe("claude-3-5-sonnet");
+      expect(settings.permissions?.defaultMode).toBe("plan");
+    });
   });
 });

@@ -58,9 +58,13 @@ import { ContentBlockParam } from "@anthropic-ai/sdk/resources";
 import { BetaContentBlock, BetaRawContentBlockDelta } from "@anthropic-ai/sdk/resources/beta.mjs";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import packageJson from "../package.json" with { type: "json" };
+import {
+  getClaudeAuthPaths,
+  resolveClaudeInvocationPaths,
+  type ClaudeInvocationPaths,
+} from "./claude-config.js";
 import { SettingsManager } from "./settings.js";
 import {
   ClaudePlanEntry,
@@ -72,9 +76,6 @@ import {
   toolUpdateFromToolResult,
 } from "./tools.js";
 import { nodeToWebReadable, nodeToWebWritable, Pushable, unreachable } from "./utils.js";
-
-export const CLAUDE_CONFIG_DIR =
-  process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude");
 
 const MAX_TITLE_LENGTH = 256;
 
@@ -110,6 +111,7 @@ type Session = {
   input: Pushable<SDKUserMessage>;
   cancelled: boolean;
   cwd: string;
+  invocationPaths: ClaudeInvocationPaths;
   permissionMode: PermissionMode;
   settingsManager: SettingsManager;
   accumulatedUsage: AccumulatedUsage;
@@ -135,6 +137,12 @@ type BackgroundTerminal =
  */
 export type NewSessionMeta = {
   claudeCode?: {
+    /**
+     * Optional invocation-specific directory for Claude state.
+     * When provided, Claude state is stored under `<configDir>/.claude`.
+     * When omitted, Claude falls back to the default `~/.claude` location.
+     */
+    configDir?: string;
     /**
      * Options forwarded to Claude Code when starting a new session.
      * Those parameters will be ignored and managed by ACP:
@@ -259,6 +267,15 @@ export function resolvePermissionMode(defaultMode?: unknown): PermissionMode {
   return mapped;
 }
 
+type ClaudeCodeOptionsWithConfig = Options & {
+  configDir?: string;
+};
+
+function claudeInvocationPathsFromMeta(meta?: unknown): ClaudeInvocationPaths {
+  const claudeCodeMeta = (meta as NewSessionMeta | undefined)?.claudeCode;
+  return resolveClaudeInvocationPaths(claudeCodeMeta?.configDir);
+}
+
 // Implement the ACP Agent interface
 export class ClaudeAcpAgent implements Agent {
   sessions: {
@@ -355,10 +372,12 @@ export class ClaudeAcpAgent implements Agent {
   }
 
   async newSession(params: NewSessionRequest): Promise<NewSessionResponse> {
+    const invocationPaths = claudeInvocationPathsFromMeta(params._meta);
+    const { authFile, backupFile } = getClaudeAuthPaths(invocationPaths);
     if (
       !this.gatewayAuthMeta &&
-      fs.existsSync(path.resolve(os.homedir(), ".claude.json.backup")) &&
-      !fs.existsSync(path.resolve(os.homedir(), ".claude.json"))
+      fs.existsSync(backupFile) &&
+      !fs.existsSync(authFile)
     ) {
       throw RequestError.authRequired();
     }
@@ -438,7 +457,13 @@ export class ClaudeAcpAgent implements Agent {
   }
 
   async unstable_listSessions(params: ListSessionsRequest): Promise<ListSessionsResponse> {
-    const sdk_sessions = await listSessions({ dir: params.cwd ?? undefined });
+    const invocationPaths = claudeInvocationPathsFromMeta(
+      (params as ListSessionsRequest & { _meta?: NewSessionMeta })._meta,
+    );
+    const sdk_sessions = await (listSessions as any)({
+      dir: params.cwd ?? undefined,
+      configDir: invocationPaths.invocationDir,
+    });
     const sessions = [];
 
     for (const session of sdk_sessions) {
@@ -935,13 +960,14 @@ export class ClaudeAcpAgent implements Agent {
 
   private async replaySessionHistory(sessionId: string): Promise<void> {
     const toolUseCache: ToolUseCache = {};
-    const messages = await getSessionMessages(sessionId);
+    const session = this.sessions[sessionId];
+    const messages = await (getSessionMessages as any)(sessionId, {
+      configDir: session?.invocationPaths.invocationDir,
+    });
 
     for (const message of messages) {
       for (const notification of toAcpNotifications(
-        // @ts-expect-error - untyped in SDK but we handle all of these
         message.message.content,
-        // @ts-expect-error - untyped in SDK but we handle all of these
         message.message.role,
         sessionId,
         toolUseCache,
@@ -1153,9 +1179,15 @@ export class ClaudeAcpAgent implements Agent {
     }
 
     const input = new Pushable<SDKUserMessage>();
+    const invocationPaths = claudeInvocationPathsFromMeta(params._meta);
 
     const settingsManager = new SettingsManager(params.cwd, {
       logger: this.logger,
+      userConfigDir: invocationPaths.claudeDir,
+      projectConfigDir: invocationPaths.usesCustomInvocationDir ? null : undefined,
+      localConfigDir: invocationPaths.usesCustomInvocationDir
+        ? invocationPaths.claudeDir
+        : undefined,
     });
     await settingsManager.initialize();
 
@@ -1203,6 +1235,7 @@ export class ClaudeAcpAgent implements Agent {
 
     // Extract options from _meta if provided
     const userProvidedOptions = (params._meta as NewSessionMeta | undefined)?.claudeCode?.options;
+    const userProvidedOptionsWithConfig = userProvidedOptions as ClaudeCodeOptionsWithConfig | undefined;
 
     // Configure thinking tokens from environment variable
     const maxThinkingTokens = process.env.MAX_THINKING_TOKENS
@@ -1220,15 +1253,19 @@ export class ClaudeAcpAgent implements Agent {
       userProvidedOptions?.tools ??
       (params._meta?.disableBuiltInTools === true ? [] : { type: "preset", preset: "claude_code" });
 
-    const options: Options = {
+    const options: ClaudeCodeOptionsWithConfig = {
       systemPrompt,
       settingSources: ["user", "project", "local"],
       ...(maxThinkingTokens !== undefined && { maxThinkingTokens }),
-      ...userProvidedOptions,
+      ...userProvidedOptionsWithConfig,
+      ...(invocationPaths.usesCustomInvocationDir
+        ? { configDir: invocationPaths.invocationDir }
+        : {}),
       env: {
         ...process.env,
         ...userProvidedOptions?.env,
         ...createEnvForGateway(this.gatewayAuthMeta),
+        CLAUDE_CONFIG_DIR: invocationPaths.claudeDir,
       },
       // Override certain fields that must be controlled by ACP
       cwd: params.cwd,
@@ -1364,6 +1401,7 @@ export class ClaudeAcpAgent implements Agent {
       input: input,
       cancelled: false,
       cwd: params.cwd,
+      invocationPaths,
       permissionMode,
       settingsManager,
       accumulatedUsage: {

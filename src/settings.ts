@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { CLAUDE_CONFIG_DIR } from "./acp-agent.js";
+import { defaultClaudeConfigDir } from "./claude-config.js";
 
 /**
  * Permission rule format examples:
@@ -59,6 +59,9 @@ export function getManagedSettingsPath(): string {
 export interface SettingsManagerOptions {
   onChange?: () => void;
   logger?: { log: (...args: any[]) => void; error: (...args: any[]) => void };
+  userConfigDir?: string;
+  projectConfigDir?: string | null;
+  localConfigDir?: string | null;
 }
 
 /**
@@ -74,6 +77,9 @@ export interface SettingsManagerOptions {
  */
 export class SettingsManager {
   private cwd: string;
+  private userConfigDir: string;
+  private projectConfigDir: string | null;
+  private localConfigDir: string | null;
   private userSettings: ClaudeCodeSettings = {};
   private projectSettings: ClaudeCodeSettings = {};
   private localSettings: ClaudeCodeSettings = {};
@@ -89,6 +95,9 @@ export class SettingsManager {
     this.cwd = cwd;
     this.onChange = options?.onChange;
     this.logger = options?.logger ?? console;
+    this.userConfigDir = options?.userConfigDir ?? defaultClaudeConfigDir();
+    this.projectConfigDir = options?.projectConfigDir ?? path.join(cwd, ".claude");
+    this.localConfigDir = options?.localConfigDir ?? path.join(cwd, ".claude");
   }
 
   /**
@@ -108,21 +117,21 @@ export class SettingsManager {
    * Returns the path to the user settings file
    */
   private getUserSettingsPath(): string {
-    return path.join(CLAUDE_CONFIG_DIR, "settings.json");
+    return path.join(this.userConfigDir, "settings.json");
   }
 
   /**
    * Returns the path to the project settings file
    */
-  private getProjectSettingsPath(): string {
-    return path.join(this.cwd, ".claude", "settings.json");
+  private getProjectSettingsPath(): string | null {
+    return this.projectConfigDir ? path.join(this.projectConfigDir, "settings.json") : null;
   }
 
   /**
    * Returns the path to the local project settings file
    */
-  private getLocalSettingsPath(): string {
-    return path.join(this.cwd, ".claude", "settings.local.json");
+  private getLocalSettingsPath(): string | null {
+    return this.localConfigDir ? path.join(this.localConfigDir, "settings.local.json") : null;
   }
 
   /**

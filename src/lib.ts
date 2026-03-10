@@ -16,6 +16,13 @@ export {
   unreachable,
 } from "./utils.js";
 export {
+  backupInvocationDirectory,
+  defaultClaudeConfigDir,
+  resolveClaudeInvocationPaths,
+  restoreInvocationDirectory,
+  type ClaudeInvocationPaths,
+} from "./claude-config.js";
+export {
   toolInfoFromToolUse,
   toDisplayPath,
   planEntries,

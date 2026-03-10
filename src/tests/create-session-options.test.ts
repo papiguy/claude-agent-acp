@@ -3,14 +3,16 @@ import { AgentSideConnection, SessionNotification } from "@agentclientprotocol/s
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeAcpAgent as ClaudeAcpAgentType } from "../acp-agent.js";
 
-let capturedOptions: Options | undefined;
+type CapturedOptions = Options & { configDir?: string };
+
+let capturedOptions: CapturedOptions | undefined;
 vi.mock("@anthropic-ai/claude-agent-sdk", async () => {
   const actual = await vi.importActual<typeof import("@anthropic-ai/claude-agent-sdk")>(
     "@anthropic-ai/claude-agent-sdk",
   );
   return {
     ...actual,
-    query: (args: { prompt: unknown; options: Options }) => {
+    query: (args: { prompt: unknown; options: CapturedOptions }) => {
       capturedOptions = args.options;
       return {
         initializationResult: async () => ({
@@ -283,5 +285,20 @@ describe("createSession options merging", () => {
     expect(capturedOptions!.mcpServers).toHaveProperty("user-server");
     // ACP-provided MCP server should also be present
     expect(capturedOptions!.mcpServers).toHaveProperty("acp-server");
+  });
+
+  it("passes invocation-specific config directories without mutating process env", async () => {
+    await agent.newSession({
+      cwd: "/test",
+      mcpServers: [],
+      _meta: {
+        claudeCode: {
+          configDir: "/users/alice/project-one",
+        },
+      },
+    });
+
+    expect(capturedOptions!.configDir).toBe("/users/alice/project-one");
+    expect(capturedOptions!.env?.CLAUDE_CONFIG_DIR).toBe("/users/alice/project-one/.claude");
   });
 });
