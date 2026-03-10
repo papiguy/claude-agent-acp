@@ -57,7 +57,7 @@
     "type": "git",
     "url": "git+https://github.com/papiguy/claude-agent-acp.git"
   },
-  "author": "Zed Industries",
+  "author": "Zed Industries & Nitin khanna",
   "license": "Apache-2.0",
   "dependencies": {
     "@agentclientprotocol/sdk": "0.15.0",
