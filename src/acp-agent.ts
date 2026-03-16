@@ -402,11 +402,7 @@ export class ClaudeAcpAgent implements Agent {
   async newSession(params: NewSessionRequest): Promise<NewSessionResponse> {
     const invocationPaths = claudeInvocationPathsFromMeta(params._meta);
     const { authFile, backupFile } = getClaudeAuthPaths(invocationPaths);
-    if (
-      !this.gatewayAuthMeta &&
-      fs.existsSync(backupFile) &&
-      !fs.existsSync(authFile)
-    ) {
+    if (!this.gatewayAuthMeta && fs.existsSync(backupFile) && !fs.existsSync(authFile)) {
       throw RequestError.authRequired();
     }
 
@@ -1264,7 +1260,9 @@ export class ClaudeAcpAgent implements Agent {
 
     // Extract options from _meta if provided
     const userProvidedOptions = (params._meta as NewSessionMeta | undefined)?.claudeCode?.options;
-    const userProvidedOptionsWithConfig = userProvidedOptions as ClaudeCodeOptionsWithConfig | undefined;
+    const userProvidedOptionsWithConfig = userProvidedOptions as
+      | ClaudeCodeOptionsWithConfig
+      | undefined;
 
     // Configure thinking tokens from environment variable
     const maxThinkingTokens = process.env.MAX_THINKING_TOKENS
@@ -1282,7 +1280,7 @@ export class ClaudeAcpAgent implements Agent {
       userProvidedOptions?.tools ??
       (params._meta?.disableBuiltInTools === true
         ? []
-        : this.defaultTools ?? { type: "preset", preset: "claude_code" });
+        : (this.defaultTools ?? { type: "preset", preset: "claude_code" }));
 
     const options: ClaudeCodeOptionsWithConfig = {
       systemPrompt,
@@ -2050,6 +2048,14 @@ export function streamEventToAcpNotifications(
 }
 
 export function runAcp() {
+  process.stdout.on("error", (error) => {
+    if ((error as Error & { code?: string }).code === "EPIPE") {
+      process.exit(0);
+    }
+
+    throw error;
+  });
+
   const input = nodeToWebWritable(process.stdout);
   const output = nodeToWebReadable(process.stdin);
 
